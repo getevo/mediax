@@ -26,7 +26,6 @@ WORKDIR /app
 
 # Copy the binary and any needed files
 COPY --from=builder /app/mediax .
-COPY --from=builder /app/config.yml .
 
 # Make sure binary is executable
 RUN chmod +x ./mediax
