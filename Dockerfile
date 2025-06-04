@@ -1,9 +1,6 @@
 # Pre Build stage
 FROM golang:1.23.5-alpine AS builder-base
-RUN apk add --no-cache build-base imagemagick-dev imagemagick
-ENV CGO_ENABLED=1
-ENV CGO_CFLAGS_ALLOW=-Xpreprocessor
-
+RUN apk add --no-cache build-base
 
 # Build Stage
 FROM builder-base AS builder
@@ -12,21 +9,21 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 
-
-RUN go build -o mediax
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -o mediax
 
 
 # Pre Runtime stage
-FROM alpine:3.19 AS runtime
+FROM alpine:3.19 AS pre-runtime
 
-
-# Install only the runtime dependencies
+# Install only the runtime dependencies (not dev headers)
 RUN apk add --no-cache imagemagick libjpeg-turbo libgcc libstdc++ libwebp-tools libwebp
 
 
-FROM runtime
+FROM pre-runtime
 WORKDIR /app
-RUN apk add --no-cache imagemagick libjpeg-turbo libgcc libstdc++ libwebp-tools libwebp
+
 # Copy the binary and any needed files
 COPY --from=builder /app/mediax .
 COPY --from=builder /app/config.yml .
