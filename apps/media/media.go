@@ -2,18 +2,17 @@ package media
 
 import (
 	"fmt"
-	httpfs "mediax/http"
-	"mediax/s3"
-
 	"github.com/getevo/evo/v2"
 	"github.com/getevo/evo/v2/lib/db/types"
 	"github.com/getevo/evo/v2/lib/gpath"
 	"github.com/getevo/evo/v2/lib/log"
+	"github.com/getevo/filesystem"
+	"github.com/getevo/filesystem/http"
+	"github.com/getevo/filesystem/localfs"
+	"github.com/getevo/filesystem/s3"
 	"github.com/getevo/restify"
 	"github.com/gofiber/fiber/v2"
 	"io"
-	"mediax/filesystem"
-	"mediax/localfs"
 	"os"
 	"path/filepath"
 	"strconv"
