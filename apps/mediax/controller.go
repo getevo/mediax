@@ -17,7 +17,7 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 
 	var url = request.URL()
 	var req media.Request
-
+	fmt.Println(url.Host)
 	if v, ok := Origins[url.Host]; ok {
 		req = media.Request{
 			Request:   request,
