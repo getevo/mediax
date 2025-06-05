@@ -30,4 +30,6 @@ COPY --from=builder /app/mediax .
 # Make sure binary is executable
 RUN chmod +x ./mediax
 
+
+
 CMD ["./mediax"]
