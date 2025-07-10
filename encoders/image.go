@@ -29,6 +29,11 @@ var Webp = media.Encoder{
 	Processor: Imagick,
 }
 
+var Avif = media.Encoder{
+	Mime:      "image/avif",
+	Processor: Imagick,
+}
+
 var Imagick = func(input *media.Request) error {
 	if input == nil {
 		return fmt.Errorf("input is nil")
@@ -78,7 +83,6 @@ var Imagick = func(input *media.Request) error {
 	}
 
 	args = append(args, input.ProcessedFilePath)
-	fmt.Println("convert", strings.Join(args, " "))
 	cmd := exec.Command("convert", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

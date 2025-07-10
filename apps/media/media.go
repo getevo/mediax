@@ -17,7 +17,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
+
+const STAGING = "__STAGING__"
 
 type Type struct {
 	Extension string
@@ -34,6 +37,12 @@ type Options struct {
 	Profile         string
 	Download        bool
 	Encoder         *Encoder
+	// Video-specific options
+	Preview   string // "true", "480p", "720p", "1080p", "4k","wxy"
+	Thumbnail string // "480p", "720p", "1080p", "4k"
+	SS        int    // timestamp in seconds for thumbnail
+	// Audio-specific options
+	Detail bool // return JSON metadata when true
 }
 
 func (o Options) ToString() string {
@@ -68,6 +77,16 @@ func (t *Type) ParseOptions(request *evo.Request) (*Options, error) {
 	if options.OutputFormat == "" {
 		options.OutputFormat = t.Extension
 	}
+
+	// Parse video-specific options
+	options.Preview = request.Query("preview").String()
+	options.Thumbnail = request.Query("thumbnail").String()
+	if request.Query("ss").String() != "" {
+		options.SS = request.Query("ss").Int()
+	}
+
+	// Parse audio-specific options
+	options.Detail = request.Query("detail").Bool()
 
 	var ok bool
 	if options.Encoder, ok = t.Encoders[options.OutputFormat]; !ok {
@@ -115,6 +134,7 @@ type Request struct {
 	Url               *evo.URL
 	File              string
 	Debug             bool
+	TraceID           string
 	Origin            *Origin
 	Extension         string
 	Request           *evo.Request
@@ -124,22 +144,53 @@ type Request struct {
 	OriginalFilePath  string
 	StagedFilePath    string
 	ProcessedFilePath string
+	ProcessedMimeType string // MIME type of the processed file (e.g., for thumbnails)
 }
 
 // StageFile stages the file in a temp path for processing. it is necessary when a file is stored on a remote storage.
 func (r *Request) StageFile() error {
 	var err error
-	for _, storage := range r.Origin.Storages {
+	var lastError error
+
+	if r.Debug {
+		log.Debug("Starting file staging", "trace_id", r.TraceID, "original_path", r.OriginalFilePath, "cache_dir", r.Origin.Project.CacheDir)
+		r.Request.Set("X-Debug-Original-Path", r.OriginalFilePath)
+		r.Request.Set("X-Debug-Cache-Dir", r.Origin.Project.CacheDir)
+	}
+
+	for i, storage := range r.Origin.Storages {
+		if r.Debug {
+			log.Debug("Trying storage", "trace_id", r.TraceID, "storage_index", i, "storage_type", storage.Type, "base_path", storage.BasePath)
+			r.Request.Set(fmt.Sprintf("X-Debug-Storage-%d-Type", i), storage.Type)
+			r.Request.Set(fmt.Sprintf("X-Debug-Storage-%d-BasePath", i), storage.BasePath)
+		}
+
 		r.StagedFilePath, err = storage.StageFile(r.OriginalFilePath, r.Origin.Project.CacheDir)
 		if err == nil {
+			if r.Debug {
+				log.Debug("File staged successfully", "trace_id", r.TraceID, "storage_index", i, "staged_path", r.StagedFilePath)
+				r.Request.Set("X-Debug-Storage-Success", fmt.Sprintf("storage-%d", i))
+				r.Request.Set("X-Debug-Staged-Path", r.StagedFilePath)
+			}
 			return nil
 		}
+
+		lastError = err
+		if r.Debug {
+			log.Debug("Storage failed", "trace_id", r.TraceID, "storage_index", i, "error", err.Error())
+			r.Request.Set(fmt.Sprintf("X-Debug-Storage-%d-Error", i), err.Error())
+		}
 	}
-	return fmt.Errorf("failed to stage file: %v", err)
+
+	if r.Debug {
+		log.Debug("All storages failed", "trace_id", r.TraceID, "last_error", lastError.Error())
+		r.Request.Set("X-Debug-Storage-Final-Error", lastError.Error())
+	}
+
+	return fmt.Errorf("failed to stage file: %v", lastError)
 }
 
 func (r *Request) ServeFile(mime string, filePath string) error {
-	fmt.Println("Serving file:", filePath, mime)
 	r.Request.Set("Content-Type", mime)
 	file, err := os.Open(filePath)
 
@@ -174,24 +225,71 @@ func (r *Request) ServeFile(mime string, filePath string) error {
 	}
 
 	rangeHeader = strings.TrimPrefix(rangeHeader, bytesPrefix)
-	ranges := strings.Split(rangeHeader, "-")
+
+	// Handle multiple ranges (for now, we'll only serve the first range)
+	// This is compliant with HTTP/1.1 spec which allows servers to ignore multipart ranges
+	rangeSpecs := strings.Split(rangeHeader, ",")
+	if len(rangeSpecs) == 0 {
+		return fiber.ErrBadRequest
+	}
+
+	// Parse the first range specification
+	rangeSpec := strings.TrimSpace(rangeSpecs[0])
+	ranges := strings.Split(rangeSpec, "-")
 	if len(ranges) != 2 {
 		return fiber.ErrBadRequest
 	}
 
-	start, err := strconv.ParseInt(ranges[0], 10, 64)
-	if err != nil || start < 0 {
-		return fiber.ErrBadRequest
-	}
+	var start, end int64
 
-	var end int64
-	if ranges[1] != "" {
+	// Handle different range formats:
+	// 1. "start-end" (e.g., "0-1023")
+	// 2. "start-" (e.g., "1024-")
+	// 3. "-suffix" (e.g., "-1024")
+	if ranges[0] == "" && ranges[1] != "" {
+		// Suffix-byte-range-spec: "-suffix"
+		suffix, err := strconv.ParseInt(ranges[1], 10, 64)
+		if err != nil || suffix <= 0 {
+			return fiber.ErrBadRequest
+		}
+		if suffix >= fileSize {
+			start = 0
+		} else {
+			start = fileSize - suffix
+		}
+		end = fileSize - 1
+	} else if ranges[0] != "" && ranges[1] == "" {
+		// Range from start to end of file: "start-"
+		var err error
+		start, err = strconv.ParseInt(ranges[0], 10, 64)
+		if err != nil || start < 0 {
+			return fiber.ErrBadRequest
+		}
+		if start >= fileSize {
+			return fiber.ErrRequestedRangeNotSatisfiable
+		}
+		end = fileSize - 1
+	} else if ranges[0] != "" && ranges[1] != "" {
+		// Specific range: "start-end"
+		var err error
+		start, err = strconv.ParseInt(ranges[0], 10, 64)
+		if err != nil || start < 0 {
+			return fiber.ErrBadRequest
+		}
 		end, err = strconv.ParseInt(ranges[1], 10, 64)
 		if err != nil || end < start {
 			return fiber.ErrBadRequest
 		}
+		// Clamp end to file size
+		if end >= fileSize {
+			end = fileSize - 1
+		}
+		if start >= fileSize {
+			return fiber.ErrRequestedRangeNotSatisfiable
+		}
 	} else {
-		end = fileSize - 1
+		// Both empty: "-"
+		return fiber.ErrBadRequest
 	}
 
 	length := end - start + 1
@@ -249,12 +347,39 @@ func (s Storage) StageFile(path, cacheDir string) (string, error) {
 
 	var filePath = filepath.Join(s.BasePath, path)
 	var stagedPath = filepath.Join(cacheDir, path)
-	if !gpath.IsFileExist(stagedPath) {
-		err := s.FS.StorageToDisk(filePath, stagedPath)
+
+	if gpath.IsFileExist(stagedPath) {
+		return stagedPath, nil
+	}
+	var c = 0
+
+	for {
+		info, err := os.Stat(stagedPath + ".lock")
 		if err != nil {
-			return "", err
+			break
+		}
+		if info.ModTime().Add(time.Minute * 5).After(time.Now()) {
+			os.Remove(stagedPath + ".lock")
+			break
+		}
+		time.Sleep(time.Second)
+		c++
+		if c > 10 {
+			return STAGING, fmt.Errorf("file is locked")
 		}
 	}
+
+	err := gpath.Write(stagedPath+".lock", []byte{})
+	if err != nil {
+		return stagedPath, err
+	}
+	defer os.Remove(stagedPath + ".lock")
+	// Download the file
+	err = s.FS.StorageToDisk(filePath, stagedPath)
+	if err != nil {
+		return "", err
+	}
+
 	return stagedPath, nil
 }
 

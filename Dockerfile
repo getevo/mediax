@@ -18,7 +18,14 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM alpine:3.19 AS pre-runtime
 
 # Install only the runtime dependencies (not dev headers)
-RUN apk add --no-cache imagemagick libjpeg-turbo libgcc libstdc++ libwebp-tools libwebp
+RUN apk add --no-cache \
+    imagemagick \
+    libjpeg-turbo \
+    libgcc \
+    libstdc++ \
+    libwebp-tools \
+    libwebp \
+    ffmpeg
 
 
 FROM pre-runtime

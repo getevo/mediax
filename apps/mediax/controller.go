@@ -3,8 +3,10 @@ package mediax
 import (
 	"fmt"
 	"github.com/getevo/evo/v2"
+	"github.com/getevo/evo/v2/lib/log"
 	"github.com/getevo/evo/v2/lib/outcome"
 	"github.com/getevo/evo/v2/lib/text"
+	"github.com/google/uuid"
 	"mediax/apps/media"
 	"path/filepath"
 	"strings"
@@ -17,7 +19,19 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 
 	var url = request.URL()
 	var req media.Request
-	fmt.Println(url.Host)
+
+	// Generate trace ID for this request
+	traceID := uuid.New().String()
+	request.Set("X-Trace-ID", traceID)
+
+	// Check if debugging is enabled
+	debugEnabled := request.Header("X-Debug") == "1"
+
+	if debugEnabled {
+		log.Debug("Request started", "trace_id", traceID, "host", url.Host, "path", url.Path)
+		request.Set("X-Debug-Host", url.Host)
+	}
+
 	if v, ok := Origins[url.Host]; ok {
 		req = media.Request{
 			Request:   request,
@@ -25,17 +39,22 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 			Url:       url,
 			Origin:    v,
 			Extension: strings.ToLower(filepath.Ext(url.Path)),
-			Debug:     request.Header("X-Debug") == "1",
+			Debug:     debugEnabled,
+			TraceID:   traceID,
 		}
 		if len(req.Origin.Storages) == 0 {
 			return outcome.Text("no storages configured for this domain").Status(evo.StatusInternalServerError)
 		}
 		extension, err := GetURLExtension(req.Url.Path)
 		if req.Debug {
-			fmt.Println("-------------------")
-			fmt.Println("Extension:", extension)
+			log.Debug("URL extension parsed", "trace_id", traceID, "extension", extension)
+			request.Set("X-Debug-Extension", extension)
 		}
 		if err != nil {
+			if req.Debug {
+				log.Debug("Unsupported media type", "trace_id", traceID, "error", err.Error())
+				request.Set("X-Debug-Error", "unsupported media type: "+err.Error())
+			}
 			return outcome.Text("unsupported media type").Status(evo.StatusUnsupportedMediaType)
 		}
 		req.Extension = extension
@@ -54,18 +73,26 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 	}
 	req.Options = options
 	if req.Debug {
-		fmt.Println("MediaType:", text.ToJSON(req.MediaType))
-		fmt.Println("Options:", text.ToJSON(req.Options))
+		log.Debug("Media processing details", "trace_id", traceID, "media_type", text.ToJSON(req.MediaType), "options", text.ToJSON(req.Options))
+		request.Set("X-Debug-MediaType", text.ToJSON(req.MediaType))
+		request.Set("X-Debug-Options", text.ToJSON(req.Options))
 	}
 	req.OriginalFilePath = TrimPrefix(req.Url.Path, req.Origin.PrefixPath)
 
 	//stage the file
 	err = req.StageFile()
 	if err != nil {
+		if req.StagedFilePath == media.STAGING {
+			req.Request.Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+			req.Request.Set("Expires", "0")
+			req.Request.Set("Pragma", "no-cache")
+			req.Request.Set("Location", req.Url.Path+"?"+req.Request.QueryString())
+			req.Request.Status(evo.StatusTemporaryRedirect)
+			return outcome.Response{}
+		}
 		req.Request.Status(evo.StatusNotFound)
 		return fmt.Errorf("file not found")
 	}
-
 	var encoder = options.Encoder
 	if encoder.Processor != nil {
 
@@ -74,7 +101,13 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 			return err
 		}
 
-		err = req.ServeFile(encoder.Mime, req.ProcessedFilePath)
+		// Use ProcessedMimeType if available (e.g., for thumbnails), otherwise use encoder's MIME type
+		mimeType := encoder.Mime
+		if req.ProcessedMimeType != "" {
+			mimeType = req.ProcessedMimeType
+		}
+
+		err = req.ServeFile(mimeType, req.ProcessedFilePath)
 		if err != nil {
 			return err
 		}

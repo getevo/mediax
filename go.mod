@@ -7,7 +7,7 @@ toolchain go1.23.9
 require (
 	github.com/getevo/docify v0.0.0-20250507211728-aa42398afa80
 	github.com/getevo/evo/v2 v2.0.0-20250507085905-7ae1a37a4236
-	github.com/getevo/filesystem v0.0.0-20250604231047-2239b4892998
+	github.com/getevo/filesystem v0.0.0-20250608135605-e5ca573365c1
 	github.com/getevo/restify v0.0.0-20250227131557-921d28a20b95
 	github.com/gofiber/fiber/v2 v2.52.5
 )
@@ -36,6 +36,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.30.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.19 // indirect
 	github.com/aws/smithy-go v1.22.3 // indirect
+	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8 // indirect
 	github.com/getevo/dsn v0.0.0-20250604222236-49ebcf3ae212 // indirect
 	github.com/getevo/json v0.0.0-20240816130540-f0ea83b195d9 // indirect
 	github.com/getevo/postman v0.0.0-20240821202756-0e5fab66b666 // indirect
