@@ -20,6 +20,7 @@ FROM alpine:3.19 AS pre-runtime
 # Install only the runtime dependencies (not dev headers)
 RUN apk add --no-cache \
     imagemagick \
+    ghostscript \
     libjpeg-turbo \
     libgcc \
     libstdc++ \
@@ -27,7 +28,15 @@ RUN apk add --no-cache \
     libwebp \
     libheif \
     libavif \
-    ffmpeg
+    ffmpeg \
+    libreoffice \
+    poppler-utils \
+    fontconfig \
+    ttf-dejavu \
+    ttf-liberation \
+    ttf-droid \
+    ttf-freefont \
+    ttf-opensans
 
 
 FROM pre-runtime

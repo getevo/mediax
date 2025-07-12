@@ -25,7 +25,9 @@ RUN apk add --no-cache \
     libstdc++ \
     libwebp-tools \
     libwebp \
-    ffmpeg
+    ffmpeg \
+    libreoffice \
+    poppler-utils
 
 
 FROM pre-runtime

@@ -3,6 +3,7 @@ package encoders
 import (
 	"context"
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"github.com/getevo/evo/v2/lib/log"
 	"mediax/apps/media"
@@ -384,10 +385,232 @@ func generateThumbnail(input *media.Request) error {
 	return nil
 }
 
+// VideoMetadata represents all video metadata information
+type VideoMetadata struct {
+	// Basic metadata
+	Format   string  `json:"format,omitempty"`
+	Duration float64 `json:"duration,omitempty"`
+	Size     int64   `json:"size,omitempty"`
+	Bitrate  int     `json:"bitrate,omitempty"`
+
+	// Video stream metadata
+	VideoCodec  string  `json:"video_codec,omitempty"`
+	Width       int     `json:"width,omitempty"`
+	Height      int     `json:"height,omitempty"`
+	AspectRatio string  `json:"aspect_ratio,omitempty"`
+	FrameRate   float64 `json:"frame_rate,omitempty"`
+	ColorSpace  string  `json:"color_space,omitempty"`
+	PixelFormat string  `json:"pixel_format,omitempty"`
+
+	// Audio stream metadata
+	AudioCodec    string `json:"audio_codec,omitempty"`
+	AudioChannels int    `json:"audio_channels,omitempty"`
+	SampleRate    int    `json:"sample_rate,omitempty"`
+
+	// Subtitle information
+	SubtitleCount int      `json:"subtitle_count,omitempty"`
+	SubtitleLangs []string `json:"subtitle_languages,omitempty"`
+
+	// File information
+	Filename string `json:"filename,omitempty"`
+	FilePath string `json:"file_path,omitempty"`
+}
+
+// generateVideoMetadata extracts all metadata from video file using ffprobe and returns as JSON
+func generateVideoMetadata(input *media.Request) error {
+	// Generate cache key for metadata
+	cacheKey := fmt.Sprintf("%x", md5.Sum([]byte(input.OriginalFilePath+"_metadata")))
+	cacheDir := filepath.Join(input.Origin.Project.CacheDir, "video_metadata")
+	os.MkdirAll(cacheDir, 0755)
+
+	jsonPath := filepath.Join(cacheDir, fmt.Sprintf("%s.json", cacheKey))
+
+	// Check if cached version exists
+	if _, err := os.Stat(jsonPath); err == nil {
+		if input.Debug {
+			log.Debug("Cache hit for video metadata", "trace_id", input.TraceID, "cache_key", cacheKey, "json_path", jsonPath)
+			input.Request.Set("X-Debug-Video-Metadata-Cache-Status", "HIT")
+			input.Request.Set("X-Debug-Video-Metadata-Cache-Key", cacheKey)
+			input.Request.Set("X-Debug-Video-Metadata-Cache-Path", jsonPath)
+		}
+		input.ProcessedFilePath = jsonPath
+		input.ProcessedMimeType = "application/json"
+		return nil
+	}
+
+	if input.Debug {
+		log.Debug("Cache miss for video metadata", "trace_id", input.TraceID, "cache_key", cacheKey, "json_path", jsonPath)
+		input.Request.Set("X-Debug-Video-Metadata-Cache-Status", "MISS")
+		input.Request.Set("X-Debug-Video-Metadata-Cache-Key", cacheKey)
+		input.Request.Set("X-Debug-Video-Metadata-Cache-Path", jsonPath)
+	}
+
+	// Get file info for size
+	fileInfo, err := os.Stat(input.StagedFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to get file info: %v", err)
+	}
+
+	// Initialize metadata structure
+	metadata := VideoMetadata{
+		Filename: filepath.Base(input.OriginalFilePath),
+		FilePath: input.OriginalFilePath,
+		Size:     fileInfo.Size(),
+	}
+
+	// Get video duration
+	duration, err := getVideoDuration(input.StagedFilePath)
+	if err != nil {
+		log.Debug("Failed to get video duration", "trace_id", input.TraceID, "error", err)
+	} else {
+		metadata.Duration = duration
+	}
+
+	// Get detailed video information using ffprobe
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get format information
+	formatCmd := exec.CommandContext(ctx, "ffprobe",
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_format",
+		input.StagedFilePath)
+
+	formatOutput, err := formatCmd.Output()
+	if err != nil {
+		log.Debug("Failed to get format information", "trace_id", input.TraceID, "error", err)
+	} else {
+		var formatData map[string]interface{}
+		if err := json.Unmarshal(formatOutput, &formatData); err == nil {
+			if format, ok := formatData["format"].(map[string]interface{}); ok {
+				if formatName, ok := format["format_name"].(string); ok {
+					metadata.Format = formatName
+				}
+				if bitrate, ok := format["bit_rate"].(string); ok {
+					bitrateInt, _ := strconv.Atoi(bitrate)
+					metadata.Bitrate = bitrateInt
+				}
+			}
+		}
+	}
+
+	// Get stream information
+	streamsCmd := exec.CommandContext(ctx, "ffprobe",
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_streams",
+		input.StagedFilePath)
+
+	streamsOutput, err := streamsCmd.Output()
+	if err != nil {
+		log.Debug("Failed to get stream information", "trace_id", input.TraceID, "error", err)
+	} else {
+		var streamsData map[string]interface{}
+		if err := json.Unmarshal(streamsOutput, &streamsData); err == nil {
+			if streams, ok := streamsData["streams"].([]interface{}); ok {
+				var subtitleCount int
+				var subtitleLangs []string
+
+				for _, stream := range streams {
+					if streamMap, ok := stream.(map[string]interface{}); ok {
+						codecType, _ := streamMap["codec_type"].(string)
+
+						switch codecType {
+						case "video":
+							if codec, ok := streamMap["codec_name"].(string); ok {
+								metadata.VideoCodec = codec
+							}
+							if width, ok := streamMap["width"].(float64); ok {
+								metadata.Width = int(width)
+							}
+							if height, ok := streamMap["height"].(float64); ok {
+								metadata.Height = int(height)
+							}
+							if width, ok := streamMap["width"].(float64); ok {
+								if height, ok := streamMap["height"].(float64); ok {
+									metadata.AspectRatio = media.GetAspectRatioName(width, height)
+								}
+							}
+							if colorSpace, ok := streamMap["color_space"].(string); ok {
+								metadata.ColorSpace = colorSpace
+							}
+							if pixFmt, ok := streamMap["pix_fmt"].(string); ok {
+								metadata.PixelFormat = pixFmt
+							}
+
+							// Extract frame rate
+							if rFrameRate, ok := streamMap["r_frame_rate"].(string); ok {
+								parts := strings.Split(rFrameRate, "/")
+								if len(parts) == 2 {
+									num, _ := strconv.ParseFloat(parts[0], 64)
+									den, _ := strconv.ParseFloat(parts[1], 64)
+									if den > 0 {
+										metadata.FrameRate = num / den
+									}
+								}
+							}
+
+						case "audio":
+							if codec, ok := streamMap["codec_name"].(string); ok {
+								metadata.AudioCodec = codec
+							}
+							if channels, ok := streamMap["channels"].(float64); ok {
+								metadata.AudioChannels = int(channels)
+							}
+							if sampleRate, ok := streamMap["sample_rate"].(string); ok {
+								sampleRateInt, _ := strconv.Atoi(sampleRate)
+								metadata.SampleRate = sampleRateInt
+							}
+
+						case "subtitle":
+							subtitleCount++
+							if tags, ok := streamMap["tags"].(map[string]interface{}); ok {
+								if language, ok := tags["language"].(string); ok {
+									subtitleLangs = append(subtitleLangs, language)
+								}
+							}
+						}
+					}
+				}
+
+				metadata.SubtitleCount = subtitleCount
+				metadata.SubtitleLangs = subtitleLangs
+			}
+		}
+	}
+
+	// Convert to JSON
+	jsonData, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata to JSON: %v", err)
+	}
+
+	// Write JSON to file
+	err = os.WriteFile(jsonPath, jsonData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write JSON metadata file: %v", err)
+	}
+
+	// Set the processed file path and MIME type
+	input.ProcessedFilePath = jsonPath
+	input.ProcessedMimeType = "application/json"
+
+	return nil
+}
+
 // processVideo handles both preview and thumbnail generation
 func processVideo(input *media.Request) error {
 	if input.Debug {
-		log.Debug("Starting video processing", "trace_id", input.TraceID, "preview", input.Options.Preview, "thumbnail", input.Options.Thumbnail)
+		log.Debug("Starting video processing", "trace_id", input.TraceID, "preview", input.Options.Preview, "thumbnail", input.Options.Thumbnail, "detail", input.Options.Detail)
+	}
+
+	// Check if this is a detail request (JSON metadata output)
+	if input.Options.Detail {
+		if input.Debug {
+			log.Debug("Processing video metadata", "trace_id", input.TraceID)
+		}
+		return generateVideoMetadata(input)
 	}
 
 	// Handle preview generation

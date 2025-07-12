@@ -6,6 +6,7 @@ import (
 	"github.com/getevo/evo/v2/lib/log"
 	"github.com/getevo/evo/v2/lib/outcome"
 	"github.com/getevo/evo/v2/lib/text"
+	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"mediax/apps/media"
 	"path/filepath"
@@ -99,6 +100,14 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 		err = encoder.Processor(&req)
 		if err != nil {
 			return err
+		}
+
+		// Check if detail=true and we have metadata to return
+		if options.Detail && len(req.Metadata) > 0 {
+			// Return metadata as JSON
+			request.Set("Content-Type", "application/json")
+			request.Status(fiber.StatusOK)
+			return req.Metadata
 		}
 
 		// Use ProcessedMimeType if available (e.g., for thumbnails), otherwise use encoder's MIME type

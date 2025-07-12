@@ -13,6 +13,7 @@ import (
 	"github.com/getevo/restify"
 	"github.com/gofiber/fiber/v2"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -144,7 +145,8 @@ type Request struct {
 	OriginalFilePath  string
 	StagedFilePath    string
 	ProcessedFilePath string
-	ProcessedMimeType string // MIME type of the processed file (e.g., for thumbnails)
+	ProcessedMimeType string                 // MIME type of the processed file (e.g., for thumbnails)
+	Metadata          map[string]interface{} `json:"metadata,omitempty"` // Metadata extracted from the file
 }
 
 // StageFile stages the file in a temp path for processing. it is necessary when a file is stored on a remote storage.
@@ -436,4 +438,40 @@ type VideoProfile struct {
 
 func (VideoProfile) TableName() string {
 	return "video_profile"
+}
+
+type Aspect struct {
+	Name   string
+	Width  float64
+	Height float64
+}
+
+// List of common aspect ratios
+var commonRatios = []Aspect{
+	{"1:1", 1, 1},
+	{"4:3", 4, 3},
+	{"3:2", 3, 2},
+	{"16:9", 16, 9},
+	{"16:10", 16, 10},
+	{"21:9", 21, 9},
+	{"2:1", 2, 1},
+	{"5:4", 5, 4},
+	{"18:9", 18, 9},
+	{"32:9", 32, 9},
+}
+
+func GetAspectRatioName(width, height float64) string {
+	if width == 0 || height == 0 {
+		return "Invalid"
+	}
+	inputRatio := width / height
+	const tolerance = 0.02 // ~2% tolerance
+
+	for _, aspect := range commonRatios {
+		ratio := aspect.Width / aspect.Height
+		if math.Abs(inputRatio-ratio) < tolerance {
+			return aspect.Name
+		}
+	}
+	return fmt.Sprintf("Custom (%.2f:1)", inputRatio)
 }

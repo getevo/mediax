@@ -310,8 +310,8 @@ func generateAudioThumbnail(input *media.Request) error {
 	return nil
 }
 
-// FFmpeg processor for audio conversion
-var FFmpeg = func(input *media.Request) error {
+// processAudio handles different audio processing operations based on request type
+func processAudio(input *media.Request) error {
 	if input == nil {
 		return fmt.Errorf("input is nil")
 	}
@@ -333,6 +333,13 @@ var FFmpeg = func(input *media.Request) error {
 		return generateAudioThumbnail(input)
 	}
 
+	// Standard audio conversion
+	return convertAudio(input)
+}
+
+// convertAudio handles the standard audio conversion using FFmpeg
+func convertAudio(input *media.Request) error {
+	var opts = input.Options
 	input.ProcessedFilePath = strings.TrimSuffix(input.StagedFilePath, filepath.Ext(input.StagedFilePath)) + opts.ToString() + "." + opts.OutputFormat
 
 	if gpath.IsFileExist(input.ProcessedFilePath) {
@@ -400,6 +407,9 @@ var FFmpeg = func(input *media.Request) error {
 
 	return nil
 }
+
+// FFmpeg processor for audio conversion
+var FFmpeg = processAudio
 
 // Helper functions for audio thumbnail processing
 func isImageFormat(format string) bool {
