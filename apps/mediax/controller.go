@@ -1,6 +1,7 @@
 package mediax
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/getevo/evo/v2"
 	"github.com/getevo/evo/v2/lib/log"
@@ -8,9 +9,12 @@ import (
 	"github.com/getevo/evo/v2/lib/text"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/expfmt"
 	"mediax/apps/media"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Controller struct{}
@@ -110,9 +114,11 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 	}
 	var encoder = options.Encoder
 	if encoder.Processor != nil {
-
+		procStart := time.Now()
 		err = encoder.Processor(&req)
+		metricProcessingDuration.WithLabelValues(req.Extension).Observe(time.Since(procStart).Seconds())
 		if err != nil {
+			metricRequests.WithLabelValues(req.Extension, "error").Inc()
 			return err
 		}
 
@@ -121,6 +127,7 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 			// Return metadata as JSON
 			request.Set("Content-Type", "application/json")
 			request.Status(fiber.StatusOK)
+			metricRequests.WithLabelValues(req.Extension, "ok").Inc()
 			return req.Metadata
 		}
 
@@ -132,15 +139,36 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 
 		err = req.ServeFile(mimeType, req.ProcessedFilePath)
 		if err != nil {
+			metricRequests.WithLabelValues(req.Extension, "error").Inc()
 			return err
 		}
 
 	} else {
 		err = req.ServeFile(encoder.Mime, req.StagedFilePath)
 		if err != nil {
+			metricRequests.WithLabelValues(req.Extension, "error").Inc()
 			return err
 		}
 	}
+	metricRequests.WithLabelValues(req.Extension, "ok").Inc()
+	return nil
+}
+
+// PrometheusMetrics serves Prometheus-format metrics at /prometheus/metrics.
+func (c Controller) PrometheusMetrics(request *evo.Request) any {
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil && len(mfs) == 0 {
+		return err
+	}
+	var buf bytes.Buffer
+	for _, mf := range mfs {
+		if _, encErr := expfmt.MetricFamilyToText(&buf, mf); encErr != nil {
+			break
+		}
+	}
+	request.Context.Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	request.Context.Status(fiber.StatusOK)
+	request.Context.Write(buf.Bytes()) //nolint:errcheck
 	return nil
 }
 

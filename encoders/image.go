@@ -227,7 +227,7 @@ func processImage(input *media.Request) error {
 					cachedData, err := json.Marshal(input.Metadata)
 					if err == nil {
 						// Write to cache file
-						err = os.WriteFile(metadataCacheFile, cachedData, 0644)
+						err = os.WriteFile(metadataCacheFile, cachedData, 0600)
 						if err != nil && input.Debug {
 							log.Error("Error writing metadata cache file", "trace_id", input.TraceID, "error", err.Error())
 						}

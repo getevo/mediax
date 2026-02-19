@@ -183,7 +183,9 @@ func generateAudioMetadata(input *media.Request) error {
 
 	// Create a temporary JSON file
 	cacheDir := filepath.Join(input.Origin.Project.CacheDir, "audio_metadata")
-	os.MkdirAll(cacheDir, 0755)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return fmt.Errorf("failed to create audio metadata cache dir: %w", err)
+	}
 
 	// Generate cache key for metadata
 	cacheKey := fmt.Sprintf("%x", md5.Sum([]byte(input.OriginalFilePath+"_metadata")))
@@ -217,7 +219,9 @@ func generateAudioThumbnail(input *media.Request) error {
 	// Generate cache key and check if thumbnail already exists
 	cacheKey := fmt.Sprintf("%x", md5.Sum([]byte(input.OriginalFilePath+input.Options.Thumbnail+outputFormat)))
 	cacheDir := filepath.Join(input.Origin.Project.CacheDir, "audio_thumbnails")
-	os.MkdirAll(cacheDir, 0755)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return fmt.Errorf("failed to create audio thumbnail cache dir: %w", err)
+	}
 
 	// Determine final file extension
 	_, finalExtension := getImageFormat(outputFormat)
@@ -298,12 +302,16 @@ func generateAudioThumbnail(input *media.Request) error {
 	output, err := convertCmd.CombinedOutput()
 	if err != nil {
 		// Clean up temporary JPEG file
-		os.Remove(jpegPath)
+		if rmErr := os.Remove(jpegPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			log.Warning("failed to remove temp jpeg", "path", jpegPath, "error", rmErr)
+		}
 		return fmt.Errorf("ImageMagick convert error: %v\noutput: %s", err, output)
 	}
 
 	// Clean up temporary JPEG file
-	os.Remove(jpegPath)
+	if rmErr := os.Remove(jpegPath); rmErr != nil && !os.IsNotExist(rmErr) {
+		log.Warning("failed to remove temp jpeg", "path", jpegPath, "error", rmErr)
+	}
 
 	input.ProcessedFilePath = finalPath
 	input.ProcessedMimeType = getImageMimeType(outputFormat)

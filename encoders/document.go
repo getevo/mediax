@@ -8,8 +8,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+// nonAlphanumeric strips every character that is not a letter or digit.
+var nonAlphanumeric = regexp.MustCompile(`[^a-zA-Z0-9]`)
+
+// sanitizeLabel returns a safe string for use in ImageMagick -annotate text.
+func sanitizeLabel(s string) string {
+	return strings.ToUpper(nonAlphanumeric.ReplaceAllString(s, ""))
+}
 
 // Document encoders for various document formats
 
@@ -124,7 +133,9 @@ func generateDocumentThumbnail(input *media.Request) error {
 	// Generate cache key and check if thumbnail already exists
 	cacheKey := fmt.Sprintf("%x", md5.Sum([]byte(input.OriginalFilePath+input.Options.Thumbnail+outputFormat)))
 	cacheDir := filepath.Join(input.Origin.Project.CacheDir, "document_thumbnails")
-	os.MkdirAll(cacheDir, 0755)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return fmt.Errorf("failed to create document thumbnail cache dir: %w", err)
+	}
 
 	// Determine final file extension
 	_, finalExtension := getImageFormat(outputFormat)
@@ -307,11 +318,19 @@ func convertOfficeToImage(officePath, outputPath string) error {
 
 // createGenericThumbnail creates a generic thumbnail for document types without specific converters
 func createGenericThumbnail(docPath, outputPath, fileType string) error {
+	// Sanitize fileType to alphanumeric only before passing to ImageMagick -annotate.
+	// This prevents special characters in the file extension from being interpreted
+	// as ImageMagick arguments or from causing unexpected behaviour.
+	safeLabel := sanitizeLabel(fileType)
+	if safeLabel == "" {
+		safeLabel = "DOC"
+	}
+
 	// Create a blank canvas with file type text
 	cmd := exec.Command("convert", "-size", "800x600", "xc:white",
 		"-gravity", "center",
 		"-pointsize", "72",
-		"-annotate", "0", fileType,
+		"-annotate", "0", safeLabel,
 		outputPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

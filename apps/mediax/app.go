@@ -21,13 +21,14 @@ func (a App) Router() error {
 	var controller Controller
 	evo.Get("/health", controller.Health)
 	evo.Post("/admin/reload", controller.Reload)
+	evo.Get("/prometheus/metrics", controller.PrometheusMetrics)
 	evo.Get("/*", controller.ServeMedia)
 	return nil
 }
 
 func (a App) WhenReady() error {
 	InitializeConfig()
-
+	startEvictionLoop()
 	return nil
 }
 

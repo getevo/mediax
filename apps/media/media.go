@@ -459,8 +459,7 @@ func (s Storage) StageFile(path, cacheDir string) (string, error) {
 	}
 	defer os.Remove(lockPath)
 	// Download the file
-	err = s.FS.StorageToDisk(filePath, stagedPath)
-	if err != nil {
+	if err := s.FS.StorageToDisk(filePath, stagedPath); err != nil {
 		return "", err
 	}
 
