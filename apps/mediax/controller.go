@@ -149,11 +149,19 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 		// processor returns nil without setting ProcessedFilePath (e.g. video
 		// pass-through when no preview/thumbnail option was requested).
 		serveFilePath := req.ProcessedFilePath
+		if req.Debug {
+			request.Set("X-Debug-Processed-Path", req.ProcessedFilePath)
+			request.Set("X-Debug-Serve-Path", req.StagedFilePath)
+		}
 		if serveFilePath == "" {
 			serveFilePath = req.StagedFilePath
 		} else if _, statErr := os.Stat(serveFilePath); statErr != nil {
 			metricRequests.WithLabelValues(req.Extension, "error").Inc()
 			return fmt.Errorf("processor did not produce output file: %w", statErr)
+		}
+		if req.Debug {
+			request.Set("X-Debug-Final-Serve-Path", serveFilePath)
+			request.Set("X-Debug-Mime-Type", mimeType)
 		}
 
 		err = req.ServeFile(mimeType, serveFilePath)
