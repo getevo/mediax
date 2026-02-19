@@ -68,9 +68,12 @@ func (l *FileSystem) Setup(confString string) error {
 
 	useSSL := !l.IgnoreSSL
 
-	lookup := minio.BucketLookupAuto
-	if l.PathStyle {
-		lookup = minio.BucketLookupPath
+	// Default to path-style for non-AWS endpoints (iDrive, MinIO, Cloudflare R2, etc.).
+	// AWS S3 uses virtual-hosted style; everything else typically requires path-style.
+	isAWS := strings.HasSuffix(l.Endpoint, "amazonaws.com")
+	lookup := minio.BucketLookupPath
+	if isAWS && !l.PathStyle {
+		lookup = minio.BucketLookupAuto
 	}
 
 	var err error
