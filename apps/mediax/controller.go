@@ -120,7 +120,13 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 		req.Request.Status(evo.StatusNotFound)
 		return fmt.Errorf("file not found: %w", err)
 	}
+	if req.Debug {
+		request.Set("X-Debug-Post-Stage", "ok")
+	}
 	var encoder = options.Encoder
+	if req.Debug {
+		request.Set("X-Debug-Encoder-Processor", fmt.Sprintf("%v", encoder.Processor != nil))
+	}
 	if encoder.Processor != nil {
 		procStart := time.Now()
 		err = encoder.Processor(&req)
