@@ -16,7 +16,7 @@ MediaX is a powerful, scalable media processing and serving server built with Go
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/getevo/mediax
 cd mediax
 
 # Install dependencies
