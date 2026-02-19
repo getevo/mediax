@@ -1,5 +1,5 @@
 # Pre Build stage
-FROM golang:1.23.5-alpine AS builder-base
+FROM golang:1.24-alpine AS builder-base
 RUN apk add --no-cache build-base
 
 # Build Stage
