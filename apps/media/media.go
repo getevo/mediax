@@ -404,9 +404,12 @@ func (s Storage) StageFile(path, cacheDir string) (string, error) {
 	// Guard against path traversal: the resolved paths must remain inside
 	// their respective roots. filepath.Join cleans ".." sequences, so a
 	// crafted path like "../../etc/passwd" would escape the base directory.
-	absBase := filepath.Clean(s.BasePath)
-	if absBase != "" && !strings.HasPrefix(filepath.Clean(filePath), absBase+string(filepath.Separator)) {
-		return "", fmt.Errorf("path traversal detected: %q escapes storage root", path)
+	// Only check when BasePath is set (S3/GCS storages have empty BasePath).
+	if s.BasePath != "" {
+		absBase := filepath.Clean(s.BasePath)
+		if !strings.HasPrefix(filepath.Clean(filePath), absBase+string(filepath.Separator)) {
+			return "", fmt.Errorf("path traversal detected: %q escapes storage root", path)
+		}
 	}
 	absCache := filepath.Clean(cacheDir)
 	if !strings.HasPrefix(filepath.Clean(stagedPath), absCache+string(filepath.Separator)) {
