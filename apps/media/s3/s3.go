@@ -41,6 +41,7 @@ type FileSystem struct {
 	Bucket    string
 	BasePath  string `default:""`
 	IgnoreSSL bool   `default:"false"`
+	PathStyle bool   `default:"false"`
 	Params    map[string]string
 
 	client *minio.Client
@@ -67,11 +68,17 @@ func (l *FileSystem) Setup(confString string) error {
 
 	useSSL := !l.IgnoreSSL
 
+	lookup := minio.BucketLookupAuto
+	if l.PathStyle {
+		lookup = minio.BucketLookupPath
+	}
+
 	var err error
 	l.client, err = minio.New(l.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(l.AccessKey, l.SecretKey, ""),
-		Secure: useSSL,
-		Region: region,
+		Creds:        credentials.NewStaticV4(l.AccessKey, l.SecretKey, ""),
+		Secure:       useSSL,
+		Region:       region,
+		BucketLookup: lookup,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create S3 client: %w", err)

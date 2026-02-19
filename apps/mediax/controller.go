@@ -24,6 +24,11 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 		return outcome.Json(map[string]string{"status": "ok"})
 	}
 
+	// Pass admin paths through to restify routes.
+	if strings.HasPrefix(url.Path, "/admin") {
+		return request.Next()
+	}
+
 	// Block until the first InitializeConfig completes. After that, the channel
 	// is permanently closed so this is a no-op for every subsequent request.
 	<-ready
