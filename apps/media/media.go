@@ -360,7 +360,9 @@ func (s Storage) StageFile(path, cacheDir string) (string, error) {
 		if err != nil {
 			break
 		}
-		if info.ModTime().Add(time.Minute * 5).After(time.Now()) {
+		if info.ModTime().Add(time.Minute * 5).Before(time.Now()) {
+			// Lock file is older than 5 minutes — the writer that created it
+			// must have crashed. Remove the stale lock and proceed.
 			os.Remove(stagedPath + ".lock")
 			break
 		}

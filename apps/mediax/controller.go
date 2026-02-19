@@ -16,7 +16,9 @@ import (
 type Controller struct{}
 
 func (c Controller) ServeMedia(request *evo.Request) any {
-	Wait.Wait()
+	// Block until the first InitializeConfig completes. After that, the channel
+	// is permanently closed so this is a no-op for every subsequent request.
+	<-ready
 
 	var url = request.URL()
 	var req media.Request
@@ -33,7 +35,7 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 		request.Set("X-Debug-Host", url.Host)
 	}
 
-	if v, ok := Origins[url.Host]; ok {
+	if v, ok := lookupOrigin(url.Host); ok {
 		req = media.Request{
 			Request:   request,
 			Domain:    url.Host,

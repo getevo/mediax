@@ -334,8 +334,4 @@ func processDocument(input *media.Request) error {
 	}
 
 	return generateDocumentThumbnail(input)
-
-	// For direct serving of documents, just return the original file
-	input.ProcessedFilePath = input.StagedFilePath
-	return nil
 }
