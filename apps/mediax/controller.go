@@ -16,11 +16,18 @@ import (
 type Controller struct{}
 
 func (c Controller) ServeMedia(request *evo.Request) any {
+	var url = request.URL()
+
+	// Fiber's /* wildcard catches all GET requests including specific routes.
+	// Handle known non-media paths before blocking on ready.
+	if url.Path == "/health" {
+		return outcome.Json(map[string]string{"status": "ok"})
+	}
+
 	// Block until the first InitializeConfig completes. After that, the channel
 	// is permanently closed so this is a no-op for every subsequent request.
 	<-ready
 
-	var url = request.URL()
 	var req media.Request
 
 	// Generate trace ID for this request
