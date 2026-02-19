@@ -17,6 +17,10 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+// s3Timeout is the default deadline for every S3 API call.
+// Prevents goroutine leaks if the storage backend is unresponsive.
+const s3Timeout = 30 * time.Second
+
 // FileSystem implements filesystem.Interface using minio-go, which is fully
 // compatible with GCS HMAC keys, AWS S3, MinIO, Cloudflare R2, and other
 // S3-compatible services. Unlike the AWS SDK v2, minio-go does not inject
@@ -88,7 +92,9 @@ func (l *FileSystem) Setup(confString string) error {
 	}
 
 	// Verify bucket is accessible.
-	exists, err := l.client.BucketExists(context.Background(), l.Bucket)
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	exists, err := l.client.BucketExists(ctx, l.Bucket)
 	if err != nil {
 		return fmt.Errorf("S3 bucket check failed for %q: %w", l.Bucket, err)
 	}
@@ -97,6 +103,11 @@ func (l *FileSystem) Setup(confString string) error {
 	}
 
 	return nil
+}
+
+// newCtx returns a context with s3Timeout deadline for a single S3 API call.
+func (l *FileSystem) newCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), s3Timeout)
 }
 
 // joinKey builds an S3 object key from the base path and a relative path,
@@ -111,13 +122,17 @@ func (l *FileSystem) joinKey(p string) string {
 // ── filesystem.Interface implementation ──────────────────────────────────────
 
 func (l *FileSystem) Touch(p string) error {
-	_, err := l.client.PutObject(context.TODO(), l.Bucket, l.joinKey(p),
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	_, err := l.client.PutObject(ctx, l.Bucket, l.joinKey(p),
 		bytes.NewReader([]byte{}), 0, minio.PutObjectOptions{})
 	return err
 }
 
 func (l *FileSystem) Delete(p string) error {
-	return l.client.RemoveObject(context.TODO(), l.Bucket, l.joinKey(p), minio.RemoveObjectOptions{})
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	return l.client.RemoveObject(ctx, l.Bucket, l.joinKey(p), minio.RemoveObjectOptions{})
 }
 
 func (l *FileSystem) List(p string) ([]string, error) {
@@ -125,8 +140,10 @@ func (l *FileSystem) List(p string) ([]string, error) {
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
+	ctx, cancel := l.newCtx()
+	defer cancel()
 	var result []string
-	for obj := range l.client.ListObjects(context.TODO(), l.Bucket, minio.ListObjectsOptions{Prefix: prefix}) {
+	for obj := range l.client.ListObjects(ctx, l.Bucket, minio.ListObjectsOptions{Prefix: prefix}) {
 		if obj.Err != nil {
 			return nil, obj.Err
 		}
@@ -140,7 +157,9 @@ func (l *FileSystem) Walk(p string, fn func(path string, info fs.FileInfo, err e
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
-	for obj := range l.client.ListObjects(context.TODO(), l.Bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	for obj := range l.client.ListObjects(ctx, l.Bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
 		if obj.Err != nil {
 			return fn("", nil, obj.Err)
 		}
@@ -154,7 +173,9 @@ func (l *FileSystem) Walk(p string, fn func(path string, info fs.FileInfo, err e
 }
 
 func (l *FileSystem) Read(p string) ([]byte, error) {
-	obj, err := l.client.GetObject(context.TODO(), l.Bucket, l.joinKey(p), minio.GetObjectOptions{})
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	obj, err := l.client.GetObject(ctx, l.Bucket, l.joinKey(p), minio.GetObjectOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +188,9 @@ func (l *FileSystem) IsDir(p string) (bool, error) {
 	if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
-	for obj := range l.client.ListObjects(context.TODO(), l.Bucket, minio.ListObjectsOptions{Prefix: prefix, MaxKeys: 1}) {
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	for obj := range l.client.ListObjects(ctx, l.Bucket, minio.ListObjectsOptions{Prefix: prefix, MaxKeys: 1}) {
 		if obj.Err != nil {
 			return false, obj.Err
 		}
@@ -177,7 +200,9 @@ func (l *FileSystem) IsDir(p string) (bool, error) {
 }
 
 func (l *FileSystem) IsFile(p string) (bool, error) {
-	_, err := l.client.StatObject(context.TODO(), l.Bucket, l.joinKey(p), minio.StatObjectOptions{})
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	_, err := l.client.StatObject(ctx, l.Bucket, l.joinKey(p), minio.StatObjectOptions{})
 	if err != nil {
 		if minio.ToErrorResponse(err).Code == "NoSuchKey" {
 			return false, nil
@@ -192,25 +217,33 @@ func (l *FileSystem) Mkdir(p string) error {
 	if !strings.HasSuffix(key, "/") {
 		key += "/"
 	}
-	_, err := l.client.PutObject(context.TODO(), l.Bucket, key,
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	_, err := l.client.PutObject(ctx, l.Bucket, key,
 		bytes.NewReader([]byte{}), 0, minio.PutObjectOptions{})
 	return err
 }
 
 func (l *FileSystem) Write(p string, data []byte) error {
-	_, err := l.client.PutObject(context.TODO(), l.Bucket, l.joinKey(p),
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	_, err := l.client.PutObject(ctx, l.Bucket, l.joinKey(p),
 		bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
 	return err
 }
 
 func (l *FileSystem) WriteBuffer(p string, reader io.Reader) error {
-	_, err := l.client.PutObject(context.TODO(), l.Bucket, l.joinKey(p),
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	_, err := l.client.PutObject(ctx, l.Bucket, l.joinKey(p),
 		reader, -1, minio.PutObjectOptions{})
 	return err
 }
 
 func (l *FileSystem) Exists(p string) (bool, error) {
-	_, err := l.client.StatObject(context.TODO(), l.Bucket, l.joinKey(p), minio.StatObjectOptions{})
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	_, err := l.client.StatObject(ctx, l.Bucket, l.joinKey(p), minio.StatObjectOptions{})
 	if err != nil {
 		if minio.ToErrorResponse(err).Code == "NoSuchKey" {
 			return false, nil
@@ -222,7 +255,9 @@ func (l *FileSystem) Exists(p string) (bool, error) {
 
 func (l *FileSystem) Stat(p string) (fs.FileInfo, error) {
 	key := l.joinKey(p)
-	info, err := l.client.StatObject(context.TODO(), l.Bucket, key, minio.StatObjectOptions{})
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	info, err := l.client.StatObject(ctx, l.Bucket, key, minio.StatObjectOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -230,9 +265,11 @@ func (l *FileSystem) Stat(p string) (fs.FileInfo, error) {
 }
 
 func (l *FileSystem) Copy(src, dst string) error {
+	ctx, cancel := l.newCtx()
+	defer cancel()
 	srcKey := l.joinKey(src)
 	dstKey := l.joinKey(dst)
-	_, err := l.client.CopyObject(context.TODO(),
+	_, err := l.client.CopyObject(ctx,
 		minio.CopyDestOptions{Bucket: l.Bucket, Object: dstKey},
 		minio.CopySrcOptions{Bucket: l.Bucket, Object: srcKey},
 	)
@@ -247,7 +284,9 @@ func (l *FileSystem) Move(src, dst string) error {
 }
 
 func (l *FileSystem) DiskToStorage(src, dst string) error {
-	_, err := l.client.FPutObject(context.TODO(), l.Bucket, l.joinKey(dst), src, minio.PutObjectOptions{})
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	_, err := l.client.FPutObject(ctx, l.Bucket, l.joinKey(dst), src, minio.PutObjectOptions{})
 	return err
 }
 
@@ -255,7 +294,9 @@ func (l *FileSystem) StorageToDisk(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
-	return l.client.FGetObject(context.TODO(), l.Bucket, l.joinKey(src), dst, minio.GetObjectOptions{})
+	ctx, cancel := l.newCtx()
+	defer cancel()
+	return l.client.FGetObject(ctx, l.Bucket, l.joinKey(src), dst, minio.GetObjectOptions{})
 }
 
 // ── fs.FileInfo implementation ────────────────────────────────────────────────

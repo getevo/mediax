@@ -131,6 +131,9 @@ func (t *Type) ParseOptions(request *evo.Request) (*Options, error) {
 	}
 
 	if options.Quality > 0 {
+		if options.Quality > 100 {
+			return nil, fmt.Errorf("invalid quality value %d: must be between 1 and 100", options.Quality)
+		}
 		options.Quality = FindClosest(options.Quality, ImageQuality)
 	}
 
@@ -419,35 +422,42 @@ func (s Storage) StageFile(path, cacheDir string) (string, error) {
 	if gpath.IsFileExist(stagedPath) {
 		return stagedPath, nil
 	}
-	var c = 0
-
-	for {
-		info, err := os.Stat(stagedPath + ".lock")
-		if err != nil {
-			break
-		}
-		if info.ModTime().Add(time.Minute * 5).Before(time.Now()) {
-			// Lock file is older than 5 minutes — the writer that created it
-			// must have crashed. Remove the stale lock and proceed.
-			os.Remove(stagedPath + ".lock")
-			break
-		}
-		time.Sleep(time.Second)
-		c++
-		if c > 10 {
-			return STAGING, fmt.Errorf("file is locked")
-		}
-	}
 
 	if err := os.MkdirAll(filepath.Dir(stagedPath), 0755); err != nil {
 		return "", fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	err := gpath.Write(stagedPath+".lock", []byte{})
-	if err != nil {
-		return stagedPath, err
+	// Atomically acquire the lock using O_CREATE|O_EXCL — the kernel guarantees
+	// that exactly one goroutine/process succeeds even under concurrent access,
+	// eliminating the TOCTOU race of the previous Stat+Write approach.
+	const lockTimeout = 5 * time.Minute
+	const lockPollCycles = 10
+	lockPath := stagedPath + ".lock"
+
+	for c := 0; ; c++ {
+		lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err == nil {
+			// We own the lock.
+			lf.Close()
+			break
+		}
+		if !os.IsExist(err) {
+			return stagedPath, fmt.Errorf("failed to create lock file: %w", err)
+		}
+		// Lock file already exists — check if it is stale.
+		if info, statErr := os.Stat(lockPath); statErr == nil {
+			if info.ModTime().Add(lockTimeout).Before(time.Now()) {
+				// Stale lock left by a crashed writer — force-remove and retry immediately.
+				os.Remove(lockPath)
+				continue
+			}
+		}
+		if c >= lockPollCycles {
+			return STAGING, fmt.Errorf("file is locked")
+		}
+		time.Sleep(time.Second)
 	}
-	defer os.Remove(stagedPath + ".lock")
+	defer os.Remove(lockPath)
 	// Download the file
 	err = s.FS.StorageToDisk(filePath, stagedPath)
 	if err != nil {

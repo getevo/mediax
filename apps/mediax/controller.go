@@ -106,7 +106,7 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 			return outcome.Response{}
 		}
 		req.Request.Status(evo.StatusNotFound)
-		return fmt.Errorf("file not found")
+		return fmt.Errorf("file not found: %w", err)
 	}
 	var encoder = options.Encoder
 	if encoder.Processor != nil {
