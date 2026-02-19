@@ -1,6 +1,7 @@
 package encoders
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/getevo/evo/v2/lib/gpath"
@@ -291,10 +292,15 @@ func convertImage(input *media.Request) error {
 	}
 
 	args = append(args, input.ProcessedFilePath)
-	cmd := exec.Command("convert", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), imageConvertTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "convert", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("convert error: %v\noutput: %s", err, output)
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("convert timed out after %s", imageConvertTimeout)
+		}
+		return fmt.Errorf("convert error: %v\noutput: %s", err, truncateOutput(output))
 	}
 
 	return nil
@@ -324,10 +330,15 @@ func extractImageMagickMetadata(filePath string) (map[string]interface{}, error)
 	metadata := make(map[string]interface{})
 
 	// Run identify command with detailed format
-	cmd := exec.Command("identify", "-format", "%w,%h,%[colorspace],%[depth],%[quality],%[format],%[exif:*]", filePath)
+	ctx, cancel := context.WithTimeout(context.Background(), imageConvertTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "identify", "-format", "%w,%h,%[colorspace],%[depth],%[quality],%[format],%[exif:*]", filePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("imagemagick identify error: %v\noutput: %s", err, output)
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("imagemagick identify timed out after %s", imageConvertTimeout)
+		}
+		return nil, fmt.Errorf("imagemagick identify error: %v\noutput: %s", err, truncateOutput(output))
 	}
 
 	// Parse the output
@@ -373,7 +384,9 @@ func extractImageMagickMetadata(filePath string) (map[string]interface{}, error)
 	}
 
 	// Get more detailed information using verbose mode
-	cmd = exec.Command("identify", "-verbose", filePath)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), imageConvertTimeout)
+	defer cancel2()
+	cmd = exec.CommandContext(ctx2, "identify", "-verbose", filePath)
 	verboseOutput, err := cmd.CombinedOutput()
 	if err == nil {
 		// Extract DPI information using regex

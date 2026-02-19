@@ -55,47 +55,6 @@ var Opus = media.Encoder{
 	Processor: FFmpeg,
 }
 
-// Audio encoders for serving without conversion (like video encoders)
-var Mp3Direct = media.Encoder{
-	Mime:      "audio/mpeg",
-	Processor: nil, // No processing needed
-}
-
-var WavDirect = media.Encoder{
-	Mime:      "audio/wav",
-	Processor: nil, // No processing needed
-}
-
-var FlacDirect = media.Encoder{
-	Mime:      "audio/flac",
-	Processor: nil, // No processing needed
-}
-
-var AacDirect = media.Encoder{
-	Mime:      "audio/aac",
-	Processor: nil, // No processing needed
-}
-
-var OggDirect = media.Encoder{
-	Mime:      "audio/ogg",
-	Processor: nil, // No processing needed
-}
-
-var M4aDirect = media.Encoder{
-	Mime:      "audio/mp4",
-	Processor: nil, // No processing needed
-}
-
-var WmaDirect = media.Encoder{
-	Mime:      "audio/x-ms-wma",
-	Processor: nil, // No processing needed
-}
-
-var OpusDirect = media.Encoder{
-	Mime:      "audio/opus",
-	Processor: nil, // No processing needed
-}
-
 // AudioMetadata represents all audio metadata information
 type AudioMetadata struct {
 	// Basic metadata
@@ -305,7 +264,7 @@ func generateAudioThumbnail(input *media.Request) error {
 		if rmErr := os.Remove(jpegPath); rmErr != nil && !os.IsNotExist(rmErr) {
 			log.Warning("failed to remove temp jpeg", "path", jpegPath, "error", rmErr)
 		}
-		return fmt.Errorf("ImageMagick convert error: %v\noutput: %s", err, output)
+		return fmt.Errorf("ImageMagick convert error: %v\noutput: %s", err, truncateOutput(output))
 	}
 
 	// Clean up temporary JPEG file
@@ -410,7 +369,7 @@ func convertAudio(input *media.Request) error {
 	cmd := exec.Command("ffmpeg", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("ffmpeg error: %v\noutput: %s", err, output)
+		return fmt.Errorf("ffmpeg error: %v\noutput: %s", err, truncateOutput(output))
 	}
 
 	return nil

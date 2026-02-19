@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
 	"mediax/apps/media"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -83,7 +84,7 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 
 	var ok bool
 	if req.MediaType, ok = MediaTypes[req.Extension]; !ok {
-		return outcome.Text("unsupported media type").Status(415)
+		return outcome.Text("unsupported media type").Status(evo.StatusUnsupportedMediaType)
 	}
 
 	options, err := req.MediaType.ParseOptions(request)
@@ -137,7 +138,18 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 			mimeType = req.ProcessedMimeType
 		}
 
-		err = req.ServeFile(mimeType, req.ProcessedFilePath)
+		// Resolve the file to serve: fall back to the staged file when the
+		// processor returns nil without setting ProcessedFilePath (e.g. video
+		// pass-through when no preview/thumbnail option was requested).
+		serveFilePath := req.ProcessedFilePath
+		if serveFilePath == "" {
+			serveFilePath = req.StagedFilePath
+		} else if _, statErr := os.Stat(serveFilePath); statErr != nil {
+			metricRequests.WithLabelValues(req.Extension, "error").Inc()
+			return fmt.Errorf("processor did not produce output file: %w", statErr)
+		}
+
+		err = req.ServeFile(mimeType, serveFilePath)
 		if err != nil {
 			metricRequests.WithLabelValues(req.Extension, "error").Inc()
 			return err
@@ -182,8 +194,5 @@ func (c Controller) Reload(request *evo.Request) any {
 }
 
 func TrimPrefix(url, prefix string) string {
-	if len(url) >= len(prefix) && url[:len(prefix)] == prefix {
-		return strings.Trim(url[len(prefix):], `\/`)
-	}
-	return url
+	return strings.Trim(strings.TrimPrefix(url, prefix), `\/`)
 }

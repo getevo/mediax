@@ -112,8 +112,6 @@ func generatePreview(input *media.Request) error {
 	}
 
 	// Calculate chunk parameters
-	chunkDuration := 4.0                                 // 4 seconds per chunk
-	maxPreviewDuration := 20.0                           // maximum 20 seconds
 	maxChunks := int(maxPreviewDuration / chunkDuration) // 5 chunks max
 
 	// Calculate how many chunks we can extract
@@ -139,15 +137,18 @@ func generatePreview(input *media.Request) error {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Extract chunks in parallel
+	// Extract chunks in parallel, bounded by a semaphore to limit concurrent FFmpeg processes.
 	var wg sync.WaitGroup
+	chunkSem := make(chan struct{}, maxConcurrentChunks)
 	chunkPaths := make([]string, chunksToExtract)
 	errors := make([]error, chunksToExtract)
 
 	for i := 0; i < chunksToExtract; i++ {
+		chunkSem <- struct{}{} // acquire slot
 		wg.Add(1)
 		go func(chunkIndex int) {
 			defer wg.Done()
+			defer func() { <-chunkSem }() // release slot
 
 			startTime := float64(chunkIndex) * interval
 			chunkPath := filepath.Join(tempDir, fmt.Sprintf("chunk_%d.mp4", chunkIndex))
@@ -164,7 +165,7 @@ func generatePreview(input *media.Request) error {
 				"-vf", fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2", width, height, width, height),
 				"-c:v", "libx264",
 				"-preset", "fast",
-				"-crf", "28", // Higher CRF for more compression
+				"-crf", ffmpegCRF, // Higher CRF for more compression
 				"-an", // Remove audio
 				"-y", chunkPath)
 
@@ -382,7 +383,7 @@ func generateThumbnail(input *media.Request) error {
 		if rmErr := os.Remove(jpegPath); rmErr != nil && !os.IsNotExist(rmErr) {
 			log.Warning("failed to remove temp jpeg", "path", jpegPath, "error", rmErr)
 		}
-		return fmt.Errorf("ImageMagick convert error: %v\noutput: %s", err, output)
+		return fmt.Errorf("ImageMagick convert error: %v\noutput: %s", err, truncateOutput(output))
 	}
 
 	// Clean up temporary JPEG file

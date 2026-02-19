@@ -1,6 +1,7 @@
 package encoders
 
 import (
+	"context"
 	"crypto/md5"
 	"fmt"
 	"github.com/getevo/evo/v2/lib/log"
@@ -207,7 +208,9 @@ func generateDocumentThumbnail(input *media.Request) error {
 	} else {
 		// Create a blank image as a last resort
 		blankImagePath := filepath.Join(cacheDir, fmt.Sprintf("%s_%s_blank.png", cacheKey, input.Options.Thumbnail))
-		err := exec.Command("convert", "-size", "800x600", "xc:white",
+		bCtx, bCancel := context.WithTimeout(context.Background(), imageConvertTimeout)
+		defer bCancel()
+		err := exec.CommandContext(bCtx, "convert", "-size", "800x600", "xc:white",
 			"-gravity", "center",
 			"-pointsize", "24",
 			"-annotate", "0", "Document Preview Unavailable",
@@ -242,7 +245,9 @@ func generateDocumentThumbnail(input *media.Request) error {
 	args = append(args, finalPath)
 
 	// Execute ImageMagick convert
-	convertCmd := exec.Command("convert", args...)
+	cvCtx, cvCancel := context.WithTimeout(context.Background(), imageConvertTimeout)
+	defer cvCancel()
+	convertCmd := exec.CommandContext(cvCtx, "convert", args...)
 	output, err := convertCmd.CombinedOutput()
 	if err != nil {
 		// Clean up temporary files
@@ -252,7 +257,10 @@ func generateDocumentThumbnail(input *media.Request) error {
 				os.Remove(genericThumbnailPath)
 			}
 		}
-		return fmt.Errorf("ImageMagick convert error: %v\noutput: %s", err, output)
+		if cvCtx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("ImageMagick convert timed out after %s", imageConvertTimeout)
+		}
+		return fmt.Errorf("ImageMagick convert error: %v\noutput: %s", err, truncateOutput(output))
 	}
 
 	// Clean up temporary files
@@ -270,10 +278,15 @@ func generateDocumentThumbnail(input *media.Request) error {
 
 // convertPdfToImage converts the first page of a PDF to an image
 func convertPdfToImage(pdfPath, outputPath string) error {
-	cmd := exec.Command("pdftoppm", "-png", "-singlefile", "-f", "1", "-l", "1", pdfPath, strings.TrimSuffix(outputPath, ".png"))
+	ctx, cancel := context.WithTimeout(context.Background(), officeConvertTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "pdftoppm", "-png", "-singlefile", "-f", "1", "-l", "1", pdfPath, strings.TrimSuffix(outputPath, ".png"))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("pdftoppm error: %v\noutput: %s", err, output)
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("pdftoppm timed out after %s", officeConvertTimeout)
+		}
+		return fmt.Errorf("pdftoppm error: %v\noutput: %s", err, truncateOutput(output))
 	}
 
 	// pdftoppm adds "-1" to the filename, so we need to rename it
@@ -301,10 +314,15 @@ func convertOfficeToImage(officePath, outputPath string) error {
 	baseNameWithoutExt := strings.TrimSuffix(baseFileName, filepath.Ext(baseFileName))
 	expectedPdfPath := filepath.Join(tempDir, baseNameWithoutExt+".pdf")
 
-	cmd := exec.Command("soffice", "--headless", "--convert-to", "pdf", "--outdir", tempDir, officePath)
+	ctx, cancel := context.WithTimeout(context.Background(), officeConvertTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "soffice", "--headless", "--convert-to", "pdf", "--outdir", tempDir, officePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("LibreOffice conversion error: %v\noutput: %s", err, output)
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("LibreOffice conversion timed out after %s", officeConvertTimeout)
+		}
+		return fmt.Errorf("LibreOffice conversion error: %v\noutput: %s", err, truncateOutput(output))
 	}
 
 	// Check if the PDF was created
@@ -327,14 +345,19 @@ func createGenericThumbnail(docPath, outputPath, fileType string) error {
 	}
 
 	// Create a blank canvas with file type text
-	cmd := exec.Command("convert", "-size", "800x600", "xc:white",
+	ctx, cancel := context.WithTimeout(context.Background(), imageConvertTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "convert", "-size", "800x600", "xc:white",
 		"-gravity", "center",
 		"-pointsize", "72",
 		"-annotate", "0", safeLabel,
 		outputPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("ImageMagick error: %v\noutput: %s", err, output)
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("ImageMagick timed out after %s", imageConvertTimeout)
+		}
+		return fmt.Errorf("ImageMagick error: %v\noutput: %s", err, truncateOutput(output))
 	}
 	return nil
 }

@@ -60,6 +60,10 @@ func queryFirst(request *evo.Request, names ...string) string {
 	return ""
 }
 
+// maxDimension is the largest width or height that a client may request.
+// Prevents runaway ImageMagick memory allocations on malicious inputs (#9).
+const maxDimension = 7680 // 8K UHD
+
 func (t *Type) ParseOptions(request *evo.Request) (*Options, error) {
 	options := &Options{}
 
@@ -69,12 +73,18 @@ func (t *Type) ParseOptions(request *evo.Request) (*Options, error) {
 		if err != nil || n < 0 {
 			return nil, fmt.Errorf("invalid width value: %q", v)
 		}
+		if n > maxDimension {
+			return nil, fmt.Errorf("width %d exceeds maximum allowed dimension %d", n, maxDimension)
+		}
 		options.Width = n
 	}
 	if v := queryFirst(request, "height", "h"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
 			return nil, fmt.Errorf("invalid height value: %q", v)
+		}
+		if n > maxDimension {
+			return nil, fmt.Errorf("height %d exceeds maximum allowed dimension %d", n, maxDimension)
 		}
 		options.Height = n
 	}
@@ -92,6 +102,9 @@ func (t *Type) ParseOptions(request *evo.Request) (*Options, error) {
 		h, err2 := strconv.Atoi(parts[1])
 		if err1 != nil || err2 != nil || w < 0 || h < 0 {
 			return nil, fmt.Errorf("invalid size value %q: width and height must be non-negative integers", size)
+		}
+		if w > maxDimension || h > maxDimension {
+			return nil, fmt.Errorf("size %q exceeds maximum allowed dimension %d", size, maxDimension)
 		}
 		options.Width = w
 		options.Height = h
