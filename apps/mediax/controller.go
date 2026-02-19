@@ -132,6 +132,15 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 	return nil
 }
 
+func (c Controller) Health(request *evo.Request) any {
+	return outcome.Json(map[string]string{"status": "ok"})
+}
+
+func (c Controller) Reload(request *evo.Request) any {
+	go InitializeConfig()
+	return outcome.Json(map[string]string{"status": "reloading"})
+}
+
 func TrimPrefix(url, prefix string) string {
 	if len(url) >= len(prefix) && url[:len(prefix)] == prefix {
 		return strings.Trim(url[len(prefix):], `\/`)

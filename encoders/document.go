@@ -3,7 +3,6 @@ package encoders
 import (
 	"crypto/md5"
 	"fmt"
-	"github.com/getevo/evo/v2"
 	"github.com/getevo/evo/v2/lib/log"
 	"mediax/apps/media"
 	"os"
@@ -327,8 +326,6 @@ func processDocument(input *media.Request) error {
 		return fmt.Errorf("input is nil")
 	}
 
-	// Check if this is a thumbnail request (image format output)
-	evo.Dump(input.Options)
 	if !isImageFormat(input.Options.OutputFormat) {
 		input.Options.OutputFormat = "jpg"
 	}

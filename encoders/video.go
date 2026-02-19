@@ -466,24 +466,26 @@ func generateVideoMetadata(input *media.Request) error {
 		metadata.Duration = duration
 	}
 
-	// Get detailed video information using ffprobe
+	// Get detailed video information using a single ffprobe call for both
+	// format and stream data, avoiding a second process spawn.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Get format information
-	formatCmd := exec.CommandContext(ctx, "ffprobe",
+	probeCmd := exec.CommandContext(ctx, "ffprobe",
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",
+		"-show_streams",
 		input.StagedFilePath)
 
-	formatOutput, err := formatCmd.Output()
+	probeOutput, err := probeCmd.Output()
 	if err != nil {
-		log.Debug("Failed to get format information", "trace_id", input.TraceID, "error", err)
+		log.Debug("Failed to get video information", "trace_id", input.TraceID, "error", err)
 	} else {
-		var formatData map[string]interface{}
-		if err := json.Unmarshal(formatOutput, &formatData); err == nil {
-			if format, ok := formatData["format"].(map[string]interface{}); ok {
+		var probeData map[string]interface{}
+		if err := json.Unmarshal(probeOutput, &probeData); err == nil {
+			// Parse format section
+			if format, ok := probeData["format"].(map[string]interface{}); ok {
 				if formatName, ok := format["format_name"].(string); ok {
 					metadata.Format = formatName
 				}
@@ -492,23 +494,8 @@ func generateVideoMetadata(input *media.Request) error {
 					metadata.Bitrate = bitrateInt
 				}
 			}
-		}
-	}
-
-	// Get stream information
-	streamsCmd := exec.CommandContext(ctx, "ffprobe",
-		"-v", "quiet",
-		"-print_format", "json",
-		"-show_streams",
-		input.StagedFilePath)
-
-	streamsOutput, err := streamsCmd.Output()
-	if err != nil {
-		log.Debug("Failed to get stream information", "trace_id", input.TraceID, "error", err)
-	} else {
-		var streamsData map[string]interface{}
-		if err := json.Unmarshal(streamsOutput, &streamsData); err == nil {
-			if streams, ok := streamsData["streams"].([]interface{}); ok {
+			// Parse streams section
+			if streams, ok := probeData["streams"].([]interface{}); ok {
 				var subtitleCount int
 				var subtitleLangs []string
 

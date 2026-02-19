@@ -50,13 +50,33 @@ func (o Options) ToString() string {
 	return fmt.Sprintf("%dx%da%tq%dd%sp%s", o.Width, o.Height, o.KeepAspectRatio, o.Quality, o.CropDirection, o.Profile)
 }
 
+// queryFirst returns the first non-empty value among the given query param names.
+func queryFirst(request *evo.Request, names ...string) string {
+	for _, name := range names {
+		if v := request.Query(name).String(); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func (t *Type) ParseOptions(request *evo.Request) (*Options, error) {
 	options := &Options{}
-	if request.Query("width").String() != "" {
-		options.Width = request.Query("width").Int()
+
+	// Accept both long form (width/height/format) and short aliases (w/h/f).
+	if v := queryFirst(request, "width", "w"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("invalid width value: %q", v)
+		}
+		options.Width = n
 	}
-	if request.Query("height").String() != "" {
-		options.Height = request.Query("height").Int()
+	if v := queryFirst(request, "height", "h"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("invalid height value: %q", v)
+		}
+		options.Height = n
 	}
 	if request.Query("q").String() != "" {
 		options.Quality = request.Query("q").Int()
@@ -65,16 +85,23 @@ func (t *Type) ParseOptions(request *evo.Request) (*Options, error) {
 	options.KeepAspectRatio = request.Query("crop").String() == ""
 	if size := request.Query("size").String(); size != "" {
 		parts := strings.Split(size, "x")
-		if len(parts) == 2 {
-			options.Width, _ = strconv.Atoi(parts[0])
-			options.Height, _ = strconv.Atoi(parts[1])
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid size format %q: expected WxH", size)
 		}
+		w, err1 := strconv.Atoi(parts[0])
+		h, err2 := strconv.Atoi(parts[1])
+		if err1 != nil || err2 != nil || w < 0 || h < 0 {
+			return nil, fmt.Errorf("invalid size value %q: width and height must be non-negative integers", size)
+		}
+		options.Width = w
+		options.Height = h
 	}
 	options.CropDirection = request.Query("dir").String()
 	if options.Width > 0 && options.Height > 0 {
 		options.KeepAspectRatio = false
 	}
-	options.OutputFormat = request.Query("format").String()
+	// Accept both long form (format) and short alias (f).
+	options.OutputFormat = queryFirst(request, "format", "f")
 	if options.OutputFormat == "" {
 		options.OutputFormat = t.Extension
 	}
@@ -110,18 +137,20 @@ func (t *Type) ParseOptions(request *evo.Request) (*Options, error) {
 	return options, nil
 }
 
+// FindClosest returns the largest value in sizes that is ≤ in.
+// sizes must be sorted descending (largest first).
+// Values larger than sizes[0] are clamped to sizes[0].
+// Values smaller than sizes[len-1] are clamped to sizes[len-1].
 func FindClosest(in int, sizes []int) int {
-	var x int
+	if len(sizes) == 0 {
+		return in
+	}
 	for _, size := range sizes {
-		x = size
-		if in > size {
-			if x == 0 {
-				return size
-			}
-			return x
+		if in >= size {
+			return size
 		}
 	}
-	return in
+	return sizes[len(sizes)-1]
 }
 
 type Encoder struct {
@@ -208,6 +237,28 @@ func (r *Request) ServeFile(mime string, filePath string) error {
 		return fiber.ErrInternalServerError
 	}
 	fileSize := fi.Size()
+
+	// Cache headers — use size+mtime as a lightweight ETag so browsers and
+	// CDNs can revalidate without re-downloading the full file.
+	etag := fmt.Sprintf(`"%x-%x"`, fi.ModTime().Unix(), fi.Size())
+	lastMod := fi.ModTime().UTC().Format(time.RFC1123)
+	c.Set("ETag", etag)
+	c.Set("Last-Modified", lastMod)
+	c.Set("Cache-Control", "public, max-age=86400")
+	c.Set("Accept-Ranges", "bytes")
+
+	// Conditional request: If-None-Match
+	if c.Get("If-None-Match") == etag {
+		c.Status(fiber.StatusNotModified)
+		return nil
+	}
+	// Conditional request: If-Modified-Since
+	if ims := c.Get("If-Modified-Since"); ims != "" {
+		if t, err := time.Parse(time.RFC1123, ims); err == nil && !fi.ModTime().After(t) {
+			c.Status(fiber.StatusNotModified)
+			return nil
+		}
+	}
 
 	rangeHeader := c.Get("Range")
 	if rangeHeader == "" {
@@ -349,6 +400,18 @@ func (s Storage) StageFile(path, cacheDir string) (string, error) {
 
 	var filePath = filepath.Join(s.BasePath, path)
 	var stagedPath = filepath.Join(cacheDir, path)
+
+	// Guard against path traversal: the resolved paths must remain inside
+	// their respective roots. filepath.Join cleans ".." sequences, so a
+	// crafted path like "../../etc/passwd" would escape the base directory.
+	absBase := filepath.Clean(s.BasePath)
+	if absBase != "" && !strings.HasPrefix(filepath.Clean(filePath), absBase+string(filepath.Separator)) {
+		return "", fmt.Errorf("path traversal detected: %q escapes storage root", path)
+	}
+	absCache := filepath.Clean(cacheDir)
+	if !strings.HasPrefix(filepath.Clean(stagedPath), absCache+string(filepath.Separator)) {
+		return "", fmt.Errorf("path traversal detected: %q escapes cache root", path)
+	}
 
 	if gpath.IsFileExist(stagedPath) {
 		return stagedPath, nil

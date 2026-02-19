@@ -19,6 +19,8 @@ func (a App) Register() error {
 
 func (a App) Router() error {
 	var controller Controller
+	evo.Get("/health", controller.Health)
+	evo.Post("/admin/reload", controller.Reload)
 	evo.Get("/*", controller.ServeMedia)
 	return nil
 }
