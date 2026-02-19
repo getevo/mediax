@@ -21,7 +21,7 @@ func (a App) Router() error {
 	var controller Controller
 	evo.Get("/health", controller.Health)
 	evo.Post("/admin/reload", controller.Reload)
-	evo.Get("/*", controller.ServeMedia)
+	evo.Use(controller.ServeMedia)
 	return nil
 }
 
