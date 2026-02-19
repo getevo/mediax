@@ -439,6 +439,10 @@ func (s Storage) StageFile(path, cacheDir string) (string, error) {
 		}
 	}
 
+	if err := os.MkdirAll(filepath.Dir(stagedPath), 0755); err != nil {
+		return "", fmt.Errorf("failed to create cache directory: %w", err)
+	}
+
 	err := gpath.Write(stagedPath+".lock", []byte{})
 	if err != nil {
 		return stagedPath, err
