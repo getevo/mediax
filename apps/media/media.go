@@ -9,7 +9,7 @@ import (
 	"github.com/getevo/filesystem"
 	"github.com/getevo/filesystem/http"
 	"github.com/getevo/filesystem/localfs"
-	"github.com/getevo/filesystem/s3"
+	localS3 "mediax/apps/media/s3"
 	"github.com/getevo/restify"
 	"github.com/gofiber/fiber/v2"
 	"io"
@@ -400,7 +400,7 @@ func (s *Storage) Init() {
 			log.Error(err)
 		}
 	case "s3":
-		s.FS, err = s3.New(s.ConfigString)
+		s.FS, err = localS3.New(s.ConfigString)
 		if err != nil {
 			log.Error(err)
 		}
