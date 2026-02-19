@@ -91,6 +91,13 @@ func (c Controller) ServeMedia(request *evo.Request) any {
 	if err != nil {
 		return err
 	}
+	if options.Profile != "" {
+		if vp, ok := lookupVideoProfile(options.Profile); ok {
+			options.VideoProfile = vp
+		} else {
+			return outcome.Text("unknown video profile: " + options.Profile).Status(evo.StatusBadRequest)
+		}
+	}
 	req.Options = options
 	if req.Debug {
 		log.Debug("Media processing details", "trace_id", traceID, "media_type", text.ToJSON(req.MediaType), "options", text.ToJSON(req.Options))

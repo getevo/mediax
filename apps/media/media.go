@@ -39,9 +39,10 @@ type Options struct {
 	Download        bool
 	Encoder         *Encoder
 	// Video-specific options
-	Preview   string // "true", "480p", "720p", "1080p", "4k","wxy"
-	Thumbnail string // "480p", "720p", "1080p", "4k"
-	SS        int    // timestamp in seconds for thumbnail
+	Preview      string        // "true", "480p", "720p", "1080p", "4k","wxy"
+	Thumbnail    string        // "480p", "720p", "1080p", "4k"
+	SS           int           // timestamp in seconds for thumbnail
+	VideoProfile *VideoProfile // resolved profile when profile= is set
 	// Audio-specific options
 	Detail bool // return JSON metadata when true
 }

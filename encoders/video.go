@@ -599,7 +599,61 @@ func generateVideoMetadata(input *media.Request) error {
 	return nil
 }
 
-// processVideo handles both preview and thumbnail generation
+// generateProfiledVideo transcodes a video using a named VideoProfile (width, height, quality, codec).
+func generateProfiledVideo(input *media.Request) error {
+	vp := input.Options.VideoProfile
+	cacheKey := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%s_profile_%s", input.OriginalFilePath, vp.Profile))))
+	cacheDir := filepath.Join(input.Origin.Project.CacheDir, "profiles")
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return fmt.Errorf("failed to create profile cache dir: %w", err)
+	}
+	outputPath := filepath.Join(cacheDir, fmt.Sprintf("%s_%s.mp4", cacheKey, vp.Profile))
+
+	if _, err := os.Stat(outputPath); err == nil {
+		if input.Debug {
+			log.Debug("Cache hit for profiled video", "trace_id", input.TraceID, "profile", vp.Profile, "path", outputPath)
+		}
+		input.ProcessedFilePath = outputPath
+		return nil
+	}
+
+	codec := vp.Codec
+	if codec == "" {
+		codec = "libx264"
+	}
+	// Map quality 1-100 → CRF 51-0 (higher quality = lower CRF)
+	crf := 51 - (vp.Quality * 51 / 100)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	scaleFilter := fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2",
+		vp.Width, vp.Height, vp.Width, vp.Height)
+
+	cmd := exec.CommandContext(ctx, "ffmpeg",
+		"-i", input.StagedFilePath,
+		"-vf", scaleFilter,
+		"-c:v", codec,
+		"-crf", strconv.Itoa(crf),
+		"-preset", "fast",
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-movflags", "+faststart",
+		"-y", outputPath,
+	)
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("video transcoding timed out for profile %q", vp.Profile)
+		}
+		return fmt.Errorf("failed to transcode video with profile %q: %v", vp.Profile, err)
+	}
+
+	input.ProcessedFilePath = outputPath
+	return nil
+}
+
+// processVideo handles preview, thumbnail, profile transcoding, and metadata.
 func processVideo(input *media.Request) error {
 	if input.Debug {
 		log.Debug("Starting video processing", "trace_id", input.TraceID, "preview", input.Options.Preview, "thumbnail", input.Options.Thumbnail, "detail", input.Options.Detail)
@@ -611,6 +665,14 @@ func processVideo(input *media.Request) error {
 			log.Debug("Processing video metadata", "trace_id", input.TraceID)
 		}
 		return generateVideoMetadata(input)
+	}
+
+	// Handle profile-based transcoding
+	if input.Options.VideoProfile != nil {
+		if input.Debug {
+			log.Debug("Processing video with profile", "trace_id", input.TraceID, "profile", input.Options.VideoProfile.Profile)
+		}
+		return generateProfiledVideo(input)
 	}
 
 	// Handle preview generation
@@ -629,7 +691,7 @@ func processVideo(input *media.Request) error {
 		return generateThumbnail(input)
 	}
 
-	// No processing needed
+	// No processing needed — serve original file
 	if input.Debug {
 		log.Debug("No video processing needed", "trace_id", input.TraceID)
 	}
