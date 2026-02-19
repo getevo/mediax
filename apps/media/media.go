@@ -245,6 +245,10 @@ func (r *Request) ServeFile(mime string, filePath string) error {
 	var c = r.Request.Context
 
 	if err != nil {
+		log.Error("failed to open file for serving", "path", filePath, "error", err)
+		if r.Debug {
+			r.Request.Set("X-Debug-ServeFile-Error", err.Error())
+		}
 		return fiber.ErrNotFound
 	}
 	defer file.Close()
