@@ -9,7 +9,12 @@ var MediaTypes = map[string]*media.Type{
 	"jpg": {
 		Extension: "jpg",
 		Mime:      "image/jpeg",
-		Encoders:  map[string]*media.Encoder{"jpg": &encoders.Jpeg, "png": &encoders.Png, "gif": &encoders.Gif, "webp": &encoders.Webp, "avif": &encoders.Avif},
+		Encoders:  map[string]*media.Encoder{"jpg": &encoders.Jpeg, "jpeg": &encoders.Jpeg, "png": &encoders.Png, "gif": &encoders.Gif, "webp": &encoders.Webp, "avif": &encoders.Avif},
+	},
+	"jpeg": {
+		Extension: "jpeg",
+		Mime:      "image/jpeg",
+		Encoders:  map[string]*media.Encoder{"jpg": &encoders.Jpeg, "jpeg": &encoders.Jpeg, "png": &encoders.Png, "gif": &encoders.Gif, "webp": &encoders.Webp, "avif": &encoders.Avif},
 	},
 	"png": {
 		Extension: "png",
