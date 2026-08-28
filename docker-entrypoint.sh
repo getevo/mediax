@@ -3,10 +3,14 @@ set -e
 
 # EVO reads /app/config.yml at startup. The image does not ship one, so build it
 # here from the environment. Without this the app silently falls back to SQLite.
-if [ -n "$MEDIAX_CONFIG" ]; then
-  # Full config.yml, base64-encoded (Railway variable).
-  echo "$MEDIAX_CONFIG" | base64 -d > /app/config.yml
+# Full config.yml, base64-encoded (Railway variable). A bad decode must not leave
+# an empty config behind: EVO would fall back to SQLite without saying so.
+if [ -n "$MEDIAX_CONFIG" ] && echo "$MEDIAX_CONFIG" | base64 -d > /tmp/config.yml 2>/dev/null && grep -q "^[[:space:]]*Type:" /tmp/config.yml; then
+  mv /tmp/config.yml /app/config.yml
 else
+  if [ -n "$MEDIAX_CONFIG" ]; then
+    echo "MEDIAX_CONFIG is not a usable config.yml, falling back to env vars" >&2
+  fi
   : "${PORT:=8080}"
   : "${DATABASE_TYPE:=mysql}"
   : "${DATABASE_DATABASE:=mediax}"
