@@ -33,10 +33,11 @@ WORKDIR /app
 
 # Copy the binary and any needed files
 COPY --from=builder /app/mediax .
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Make sure binary is executable
-RUN chmod +x ./mediax
+RUN chmod +x ./mediax /app/docker-entrypoint.sh
 
-
-
-CMD ["./mediax"]
+ENV PORT=8080
+EXPOSE 8080
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
